@@ -1,0 +1,136 @@
+###
+# Edit these values
+###
+- defaults:
+    name: global
+    mail-to: aweiteka@redhat.com
+    description: >
+        A jenkins-jobs template to create jobs in Jenkins.
+        Do not edit this job through the web user interface.
+    ose-uri: 10.18.41.75
+    ose-username: test
+    ose-password: test
+    ose-insecure: true
+    # output of `oc whoami -t` -- session token, this appears to expire quickly
+    #ose-api-auth-token: <token>
+    ose-project-namespace: test
+    ose-imagestream-name: centos
+    ose-image-name: centos-httpd
+    ose-image-tag-major-version: 1
+    ose-image-tag-build-number: 3
+    ose-image-tag-increment: 1
+- scm:
+    name: source
+    scm:
+      - git:
+          url: 'https://github.com/apache/httpd.git'
+          branches:
+           - origin/master
+          skip-tag: true
+- scm:
+    name: dockerfile
+    scm:
+      - git:
+          url: 'https://github.com/aweiteka/CentOS-Dockerfiles.git'
+          basedir: httpd/centos7
+          branches:
+           - origin/master
+          skip-tag: true
+
+###
+# End edit values
+###
+
+- project:
+   name: automated-builds
+   jobs:
+    - 'unit-test'
+    - 'dockerfile-lint-test'
+    - 'build-image'
+    - 'functional-test'
+    - 'promote-image-tag'
+    - 'refresh-imagestreams'
+    - 'update-jobs-from-yaml'
+#    - time-based or other trigger to scan for image vulerabilities
+#      requires: run from image scan image. how do we access the images or containers?
+#                we want to run on all of the image streams
+#    - build job triggered by image scan, etc
+
+- job-template:
+    name: 'unit-test'
+    description: Run source unit tests
+    builders:
+      - shell: 'sudo pip install -r requirements.txt'
+      - shell: 'sudo pip install pytest-cov coveralls'
+      - shell: 'sudo python -m pytest -vv tests --cov atomicapp --cov-report=xml --junit-xml=result.xml'
+    publishers:
+    - archive:
+        artifacts: '**/**'
+        allow-empty: 'true'
+    scm:
+      - source
+
+- job-template:
+    name: 'functional-test'
+    description: Run functional tests on deployed container
+    builders:
+      - shell: curl localhost:80
+    publishers:
+    - archive:
+        artifacts: '**/**'
+        allow-empty: 'true'
+    scm:
+      - dockerfile
+
+###
+# Service jobs
+# You typically will not need to edit anything below
+###
+
+- job-template:
+    name: 'refresh-imagestreams'
+    description: Update OpenShift imagestreams to detect upstream image changes
+    builders:
+      - shell: oc login -u {ose-username} -p {ose-password} -n {ose-project-namespace} --insecure-skip-tls-verify={ose-insecure} {ose-uri}
+      - shell: 'oc import-image {ose-imagestream-name}'
+    triggers:
+      - timed: '@hourly'
+
+- job-template:
+    name: 'build-image'
+    description: Start a build in OpenShift
+    builders:
+      - shell: oc login -u {ose-username} -p {ose-password} -n {ose-project-namespace} --insecure-skip-tls-verify={ose-insecure} {ose-uri}
+      - shell: 'BUILD=$(oc start-build {ose-image-name}-build) && sleep 10 && oc build-logs $BUILD -f'
+      # FIXME: if build or push fails 'build-logs' tail still returns $0
+      - shell: echo "TODO validate build success-fail"
+
+- job-template:
+    name: 'dockerfile-lint-test'
+    description: Run dockerfile_lint on source
+    scm:
+      - dockerfile
+    builders:
+      - shell: 'sudo yum install -y npm'
+      - shell: 'sudo npm install git+https://github.com/projectatomic/dockerfile_lint'
+      - shell: 'sudo /root/node_modules/dockerfile_lint/bin/dockerfile_lint -f Dockerfile'
+
+- job-template:
+    name: 'update-jobs-from-yaml'
+    description: >
+        Updates jenkins jobs from the Jenkins Job builder yaml file checked into scm.
+        This job creates or updates other jobs. It's the mother of all jobs.
+    scm:
+      - dockerfile
+    triggers:
+      - pollscm: "H/30 * * * *"
+    builders:
+        - shell: 'jenkins-jobs --conf config/jenkins-jobs.ini --ignore-cache update -r --delete-old jenkins-jobs.yaml'
+
+- job-template:
+    name: 'promote-image-tag'
+    description: Promote image using tag
+    builders:
+      - shell: oc login -u {ose-username} -p {ose-password} -n {ose-project-namespace} --insecure-skip-tls-verify={ose-insecure} {ose-uri}
+      - shell: oc tag {ose-image-name}:{ose-image-tag-major-version}-{ose-image-tag-build-number} {ose-image-name}:{ose-image-tag-major-version}-`expr {ose-image-tag-build-number} + {ose-image-tag-increment}`
+
