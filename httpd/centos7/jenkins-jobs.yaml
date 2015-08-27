@@ -34,7 +34,7 @@
           url: 'https://github.com/aweiteka/CentOS-Dockerfiles.git'
           basedir: httpd/centos7
           branches:
-           - origin/master
+           - origin/jenkins
           skip-tag: true
 
 ###
