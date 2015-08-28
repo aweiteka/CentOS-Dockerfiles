@@ -119,10 +119,43 @@
             results:
             - failure
     builders:
-      - shell: oc login -u {ose-username} -p {ose-password} -n {ose-project-namespace} --insecure-skip-tls-verify={ose-insecure} {ose-uri}
-      - shell: 'BUILD=$(oc start-build {ose-image-name}-build) && sleep 10 && oc build-logs $BUILD -f'
-      # FIXME: if build or push fails 'build-logs' tail still returns $0
-      - shell: echo "TODO validate build success-fail"
+      - shell: |
+          #!/bin/bash -x
+
+          ###
+          # kicking off the build exits immediately
+          # follow the logs but the log tail succeeds even if the build fails
+          # grab the success-fail of the actual build
+          ###
+
+          oc login -u {ose-username} -p {ose-password} \
+                   -n {ose-project-namespace} \
+                   --insecure-skip-tls-verify={ose-insecure} \
+                   {ose-uri}
+          BUILD=$(oc start-build {ose-image-name}-build)
+          sleep 10
+          oc build-logs $BUILD -f
+          # escape brackets with yet another bracket for jjb compatibility
+          BUILD_STATUS=$(oc get builds $BUILD -o template -t {{{{.status.phase}}}})
+          count=1
+          attempts=10
+          while [ $BUILD_STATUS == "Running" -a $count -lt $attempts ]; do
+            echo "Waiting for build status to complete, attempt $count/$attempts"
+            sleep 5
+            BUILD_STATUS=$(oc get builds $BUILD -o template -t {{{{.status.phase}}}})
+            if [[ $BUILD_STATUS == "Failed" ]]; then
+              oc get builds $BUILD -o yaml
+              echo "Build status: $BUILD_STATUS"
+              exit 1
+            elif [[ $BUILD_STATUS == "Success" ]]; then
+              echo "Build success"
+              exit 0
+            fi
+            count=$(($count+1))
+
+          done
+          echo "Build has timed out, attempt $count/$attempts."
+          exit 1
 
 - job-template:
     name: 'image-scan'
