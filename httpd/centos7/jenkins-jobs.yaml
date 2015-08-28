@@ -9,7 +9,7 @@
 # 2. Edit the global parameters and config/jenkins-jobs.ini file
 # 3. Run jenkins-jobs CLI to upload XML to your jenkins master
 #    jenkins-jobs --conf config/jenkins-jobs.ini --ignore-cache update jenkins-jobs.yaml
-# 4. Once you're satisfied, commit and push. As needs change rinse and repeat
+# 4. Once you're satisfied, commit and push. jenkins-jobs will be run each time the repo changes
 ###
 
 ###
@@ -30,6 +30,7 @@
     ose-project-namespace: test
     ose-imagestream-name: centos
     ose-image-name: centos-httpd
+    context-dir: httpd/centos7
     ose-image-tag-major-version: 1
     ose-image-tag-build-number: 3
     ose-image-tag-increment: 1
@@ -40,7 +41,6 @@
     scm:
       - git:
           url: 'https://github.com/aweiteka/CentOS-Dockerfiles.git'
-          basedir: httpd/centos7
           branches:
            - origin/jenkins
           skip-tag: true
@@ -142,7 +142,7 @@
     builders:
       - shell: 'sudo yum install -y npm'
       - shell: 'sudo npm install git+https://github.com/projectatomic/dockerfile_lint'
-      - shell: 'sudo /root/node_modules/dockerfile_lint/bin/dockerfile_lint -f Dockerfile'
+      - shell: 'sudo /root/node_modules/dockerfile_lint/bin/dockerfile_lint -f {context-dir}/Dockerfile'
 
 - job-template:
     name: 'promote-image-tag'
@@ -166,5 +166,5 @@
     triggers:
       - pollscm: "H/5 * * * *"
     builders:
-        - shell: 'jenkins-jobs --conf config/jenkins-jobs.ini --ignore-cache update -r --delete-old jenkins-jobs.yaml'
+        - shell: 'jenkins-jobs --conf {context-dir}/config/jenkins-jobs.ini --ignore-cache update -r --delete-old {context-dir}/jenkins-jobs.yaml'
 
