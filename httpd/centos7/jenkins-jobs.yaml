@@ -29,7 +29,7 @@
     #ose-api-auth-token: <token>
     ose-project-namespace: test
     ose-imagestream-name: centos
-    ose-image-name: centos-httpd
+    ose-image-name: httpd
     context-dir: httpd/centos7
     ose-image-tag-major-version: 1
     ose-image-tag-build-number: 3
