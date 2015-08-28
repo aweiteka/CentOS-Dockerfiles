@@ -174,8 +174,8 @@
       - pollscm: "H/5 * * * *"
     builders:
       - shell: 'sudo yum install -y npm'
-      - shell: 'sudo npm install git+https://github.com/projectatomic/dockerfile_lint'
-      - shell: 'sudo /root/node_modules/dockerfile_lint/bin/dockerfile_lint -f {context-dir}/Dockerfile'
+      - shell: 'npm install git+https://github.com/projectatomic/dockerfile_lint'
+      - shell: './node_modules/dockerfile_lint/bin/dockerfile_lint -f {context-dir}/Dockerfile'
 
 - job-template:
     name: 'promote-image-tag'
