@@ -1,5 +1,19 @@
 ###
-# Edit these values
+# This is a Jenkins Job builder template for creating jenkins jobs.
+# It is not a Jenkins plugin. It is a CLI tool that parses a yaml file
+# and uploads job XML to a jenkins server. It allows jenkins jobs to be
+# developed outside of the Jenkins web UI and kept under version control.
+# Documentation: http://docs.openstack.org/infra/jenkins-job-builder/
+#
+# 1. Place a copy of this file and the config directory to your source repository
+# 2. Edit the global parameters and config/jenkins-jobs.ini file
+# 3. Run jenkins-jobs CLI to upload XML to your jenkins master
+#    jenkins-jobs --conf config/jenkins-jobs.ini --ignore-cache update jenkins-jobs.yaml
+# 4. Once you're satisfied, commit and push. As needs change rinse and repeat
+###
+
+###
+# Edit these values for your project.
 ###
 - defaults:
     name: global
@@ -19,14 +33,8 @@
     ose-image-tag-major-version: 1
     ose-image-tag-build-number: 3
     ose-image-tag-increment: 1
-- scm:
-    name: source
-    scm:
-      - git:
-          url: 'https://github.com/apache/httpd.git'
-          branches:
-           - origin/master
-          skip-tag: true
+# If you have more than once source repository copy the scm section
+# edit and use the name value to use it in your job
 - scm:
     name: dockerfile
     scm:
@@ -44,21 +52,21 @@
 - project:
    name: automated-builds
    jobs:
-    - 'unit-test'
+    # update this list if you add or remove a job-template
     - 'dockerfile-lint-test'
     - 'build-image'
     - 'functional-test'
     - 'promote-image-tag'
     - 'refresh-imagestreams'
     - 'update-jobs-from-yaml'
-#    - time-based or other trigger to scan for image vulerabilities
-#      requires: run from image scan image. how do we access the images or containers?
-#                we want to run on all of the image streams
-#    - build job triggered by image scan, etc
+    - 'image-scan'
+    # - 'submit-certification'
+    # - 'push-to-external-registry'
+    #- 'unit-test'
 
 - job-template:
     name: 'unit-test'
-    description: Run source unit tests
+    description: "OPTIONAL: Run source unit tests"
     builders:
       - shell: 'sudo pip install -r requirements.txt'
       - shell: 'sudo pip install pytest-cov coveralls'
@@ -68,7 +76,7 @@
         artifacts: '**/**'
         allow-empty: 'true'
     scm:
-      - source
+      - dockerfile
 
 - job-template:
     name: 'functional-test'
@@ -99,6 +107,17 @@
 - job-template:
     name: 'build-image'
     description: Start a build in OpenShift
+    scm:
+      - dockerfile
+    triggers:
+      # run job if repo changes or if the image-scan job fails
+      - pollscm: "H/5 * * * *"
+      - build-result:
+          groups:
+          - jobs:
+            - image-scan
+            results:
+            - failure
     builders:
       - shell: oc login -u {ose-username} -p {ose-password} -n {ose-project-namespace} --insecure-skip-tls-verify={ose-insecure} {ose-uri}
       - shell: 'BUILD=$(oc start-build {ose-image-name}-build) && sleep 10 && oc build-logs $BUILD -f'
@@ -106,14 +125,36 @@
       - shell: echo "TODO validate build success-fail"
 
 - job-template:
+    name: 'image-scan'
+    description: Placeholder job to scan image for vulnerabilities FIXME
+    builders:
+      - shell: echo "true"
+    triggers:
+      - timed: '@hourly'
+
+- job-template:
     name: 'dockerfile-lint-test'
-    description: Run dockerfile_lint on source
+    description: Check Dockerfile using dockerfile_lint tool
     scm:
       - dockerfile
+    triggers:
+      - pollscm: "H/5 * * * *"
     builders:
       - shell: 'sudo yum install -y npm'
       - shell: 'sudo npm install git+https://github.com/projectatomic/dockerfile_lint'
       - shell: 'sudo /root/node_modules/dockerfile_lint/bin/dockerfile_lint -f Dockerfile'
+
+- job-template:
+    name: 'promote-image-tag'
+    description: Promote image using tag
+    triggers:
+    - build-result:
+        groups:
+          - jobs:
+            - functional-test
+    builders:
+      - shell: oc login -u {ose-username} -p {ose-password} -n {ose-project-namespace} --insecure-skip-tls-verify={ose-insecure} {ose-uri}
+      - shell: oc tag {ose-image-name}:{ose-image-tag-major-version}-{ose-image-tag-build-number} {ose-image-name}:{ose-image-tag-major-version}-`expr {ose-image-tag-build-number} + {ose-image-tag-increment}`
 
 - job-template:
     name: 'update-jobs-from-yaml'
@@ -123,14 +164,7 @@
     scm:
       - dockerfile
     triggers:
-      - pollscm: "H/30 * * * *"
+      - pollscm: "H/5 * * * *"
     builders:
         - shell: 'jenkins-jobs --conf config/jenkins-jobs.ini --ignore-cache update -r --delete-old jenkins-jobs.yaml'
-
-- job-template:
-    name: 'promote-image-tag'
-    description: Promote image using tag
-    builders:
-      - shell: oc login -u {ose-username} -p {ose-password} -n {ose-project-namespace} --insecure-skip-tls-verify={ose-insecure} {ose-uri}
-      - shell: oc tag {ose-image-name}:{ose-image-tag-major-version}-{ose-image-tag-build-number} {ose-image-name}:{ose-image-tag-major-version}-`expr {ose-image-tag-build-number} + {ose-image-tag-increment}`
 
