@@ -53,16 +53,15 @@
    name: automated-builds
    jobs:
     # update this list if you add or remove a job-template
+    #- 'unit-test'
+    #- 'image-scan'
     - 'dockerfile-lint-test'
     - 'build-image'
     - 'functional-test'
     - 'promote-image-tag'
+    #- 'submit-certification'
     - 'refresh-imagestreams'
     - 'update-jobs-from-yaml'
-    - 'image-scan'
-    # - 'submit-certification'
-    # - 'push-to-external-registry'
-    #- 'unit-test'
 
 - job-template:
     name: 'unit-test'
@@ -80,15 +79,24 @@
 
 - job-template:
     name: 'functional-test'
-    description: Run functional tests on deployed container
+    description: Deploy container and run functional tests
     builders:
-      - shell: curl localhost:80
+      - shell: oc login -u {ose-username} -p {ose-password} -n {ose-project-namespace} --insecure-skip-tls-verify={ose-insecure} {ose-uri}
+      - shell: |
+          #!/bin/bash -x
+
+          DEPLOYMENT=$(oc deploy {ose-image-name}-test --latest)
+          echo $DEPLOYMENT
+          oc get pods -l name=httpd-test -o template -t '{{ $a:=index .items 0 }}{{ $a.metadata.name }}'
+
     publishers:
     - archive:
         artifacts: '**/**'
         allow-empty: 'true'
     scm:
       - dockerfile
+    #triggers:
+    #  - timed: '@hourly'
 
 ###
 # Service jobs
