@@ -120,11 +120,11 @@
             - failure
     builders:
       - shell: |
-          #!/bin/bash -x
+          #!/bin/bash
 
           ###
           # kicking off the build exits immediately
-          # follow the logs but the log tail succeeds even if the build fails
+          # we follow the logs but the log tail succeeds even if the build fails
           # grab the success-fail of the actual build
           ###
 
@@ -133,14 +133,14 @@
                    --insecure-skip-tls-verify={ose-insecure} \
                    {ose-uri}
           BUILD=$(oc start-build {ose-image-name}-build)
-          sleep 10
+          sleep 5
           oc build-logs $BUILD -f
           # escape brackets with yet another bracket for jjb compatibility
           BUILD_STATUS=$(oc get builds $BUILD -o template -t {{{{.status.phase}}}})
           count=1
           attempts=10
           while [ $BUILD_STATUS == "Running" -a $count -lt $attempts ]; do
-            echo "Waiting for build status to complete, attempt $count/$attempts"
+            echo "Waiting for build status ('$BUILD_STATUS') to complete, attempt $count/$attempts"
             sleep 5
             BUILD_STATUS=$(oc get builds $BUILD -o template -t {{{{.status.phase}}}})
             if [[ $BUILD_STATUS == "Failed" ]]; then
@@ -148,12 +148,13 @@
               echo "Build status: $BUILD_STATUS"
               exit 1
             elif [[ $BUILD_STATUS == "Success" ]]; then
-              echo "Build success"
+              echo "Build status: $BUILD_STATUS"
               exit 0
             fi
             count=$(($count+1))
 
           done
+          echo "Build status: $BUILD_STATUS"
           echo "Build has timed out, attempt $count/$attempts."
           exit 1
 
