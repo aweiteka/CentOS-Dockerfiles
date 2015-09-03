@@ -54,11 +54,11 @@
    jobs:
     # update this list if you add or remove a job-template
     #- 'unit-test'
-    #- 'image-scan'
+    - 'image-scan'
     - 'dockerfile-lint-test'
     - 'build-image'
     - 'functional-test'
-    - 'promote-image-tag'
+    - 'tag-release-image'
     #- 'submit-certification'
     - 'refresh-imagestreams'
     - 'update-jobs-from-yaml'
@@ -66,37 +66,33 @@
 - job-template:
     name: 'unit-test'
     description: "OPTIONAL: Run source unit tests"
+    scm:
+      - dockerfile
     builders:
-      - shell: 'sudo pip install -r requirements.txt'
-      - shell: 'sudo pip install pytest-cov coveralls'
-      - shell: 'sudo python -m pytest -vv tests --cov atomicapp --cov-report=xml --junit-xml=result.xml'
+      - shell: 'make test'
     publishers:
     - archive:
         artifacts: '**/**'
         allow-empty: 'true'
-    scm:
-      - dockerfile
 
 - job-template:
     name: 'functional-test'
     description: Deploy container and run functional tests
+    scm:
+      - dockerfile
     builders:
       - shell: oc login -u {ose-username} -p {ose-password} -n {ose-project-namespace} --insecure-skip-tls-verify={ose-insecure} {ose-uri}
       - shell: |
           #!/bin/bash -x
 
-          DEPLOYMENT=$(oc deploy {ose-image-name}-test --latest)
+          DEPLOYMENT=$(oc deploy {ose-image-name} --latest)
           echo $DEPLOYMENT
-          oc get pods -l name=httpd-test -o template -t '{{ $a:=index .items 0 }}{{ $a.metadata.name }}'
+          oc get pods -l name={ose-image-name} -o template -t '{{ $a:=index .items 0 }}{{ $a.metadata.name }}'
 
     publishers:
     - archive:
         artifacts: '**/**'
         allow-empty: 'true'
-    scm:
-      - dockerfile
-    #triggers:
-    #  - timed: '@hourly'
 
 ###
 # Service jobs
@@ -111,6 +107,11 @@
       - shell: 'oc import-image {ose-imagestream-name}'
     triggers:
       - timed: '@hourly'
+    publishers:
+      - trigger-parameterized-builds:
+          - project: 'build-image'
+            current-parameters: true
+            condition: 'UNSTABLE_OR_WORSE'
 
 - job-template:
     name: 'build-image'
@@ -120,12 +121,6 @@
     triggers:
       # run job if repo changes or if the image-scan job fails
       - pollscm: "H/5 * * * *"
-      - build-result:
-          groups:
-          - jobs:
-            - image-scan
-            results:
-            - failure
     builders:
       - shell: |
           #!/bin/bash
@@ -140,7 +135,7 @@
                    -n {ose-project-namespace} \
                    --insecure-skip-tls-verify={ose-insecure} \
                    {ose-uri}
-          BUILD=$(oc start-build {ose-image-name}-build)
+          BUILD=$(oc start-build {ose-image-name})
           sleep 5
           oc build-logs $BUILD -f
           # escape brackets with yet another bracket for jjb compatibility
@@ -165,12 +160,20 @@
           echo "Build status: $BUILD_STATUS"
           echo "Build has timed out, attempt $count/$attempts."
           exit 1
+    publishers:
+      - trigger-parameterized-builds:
+          - project: 'functional-test'
+            current-parameters: true
+            condition: 'SUCCESS'
 
 - job-template:
     name: 'image-scan'
     description: Placeholder job to scan image for vulnerabilities FIXME
     builders:
-      - shell: echo "true"
+      - shell: exit 1
+      - trigger-builds:
+        - project: "build-image"
+          current-parameters: true
     triggers:
       - timed: '@hourly'
 
@@ -185,15 +188,17 @@
       - shell: 'sudo yum install -y npm'
       - shell: 'npm install git+https://github.com/projectatomic/dockerfile_lint'
       - shell: './node_modules/dockerfile_lint/bin/dockerfile_lint -f {context-dir}/Dockerfile'
+      - trigger-builds:
+        - project: "build-image"
+          current-parameters: true
 
 - job-template:
-    name: 'promote-image-tag'
-    description: Promote image using tag
-    triggers:
-    - build-result:
-        groups:
-          - jobs:
-            - functional-test
+    name: 'tag-release-image'
+    description: "Release image by tag"
+    parameters:
+      - string:
+          name: TAG
+          description: "Tag for image release"
     builders:
       - shell: oc login -u {ose-username} -p {ose-password} -n {ose-project-namespace} --insecure-skip-tls-verify={ose-insecure} {ose-uri}
       - shell: oc tag {ose-image-name}:{ose-image-tag-major-version}-{ose-image-tag-build-number} {ose-image-name}:{ose-image-tag-major-version}-`expr {ose-image-tag-build-number} + {ose-image-tag-increment}`
@@ -206,7 +211,8 @@
     scm:
       - dockerfile
     triggers:
-      - pollscm: "H/5 * * * *"
+      - pollscm: "H/15 * * * *"
+    disabled: true
     builders:
-        - shell: 'jenkins-jobs --conf {context-dir}/config/jenkins-jobs.ini --ignore-cache update -r --delete-old {context-dir}/jenkins-jobs.yaml'
+        - shell: 'jenkins-jobs --conf {context-dir}/config/jenkins-jobs.ini --ignore-cache update -r {context-dir}/jenkins-jobs.yaml'
 
