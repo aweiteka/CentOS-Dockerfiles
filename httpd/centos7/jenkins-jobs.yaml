@@ -21,33 +21,37 @@
     description: >
         A jenkins-jobs template to create jobs in Jenkins.
         Do not edit this job through the web user interface.
-    ose-uri: 10.18.41.75
+    ose-uri: https://192.168.1.13:8443
     ose-username: test
     ose-password: test
     ose-insecure: true
-    # output of `oc whoami -t` -- session token, this appears to expire quickly
-    #ose-api-auth-token: <token>
     ose-project-namespace: test
-    ose-imagestream-name: centos
-    ose-image-name: httpd
-    context-dir: httpd/centos7
-    ose-image-tag-major-version: 1
-    ose-image-tag-build-number: 3
-    ose-image-tag-increment: 1
+    ose-token-file: /var/run/secrets/kubernetes.io/serviceaccount/token
+    ose-imagestream-name: openshift/jenkins-1-centos7
+    ose-image-name: acmeapp
+    context-dir: jenkins/master
 # If you have more than once source repository copy the scm section
 # edit and use the name value to use it in your job
 - scm:
     name: dockerfile
     scm:
       - git:
-          url: 'https://github.com/aweiteka/CentOS-Dockerfiles.git'
+          url: 'https://github.com/aweiteka/ose-build-pipeline.git'
           branches:
-           - origin/jenkins
+           - origin/master
           skip-tag: true
+          git-config-name: Aaron Weitekamp
+          git-config-email: aweiteka@redhat.com
 
 ###
 # End edit values
 ###
+
+- builder:
+    name: oc-command
+    description: Authenticated oc command
+    builders:
+      - shell: 'OC=oc -n {ose-project-namespace} --token=`cat {ose-token-file}` --insecure-skip-tls-verify={ose-insecure} --server={ose-uri}'
 
 - project:
    name: automated-builds
@@ -103,8 +107,8 @@
     name: 'refresh-imagestreams'
     description: Update OpenShift imagestreams to detect upstream image changes
     builders:
-      - shell: oc login -u {ose-username} -p {ose-password} -n {ose-project-namespace} --insecure-skip-tls-verify={ose-insecure} {ose-uri}
-      - shell: 'oc import-image {ose-imagestream-name}'
+      - oc-command
+      - shell: '$OC import-image {ose-imagestream-name}'
     triggers:
       - timed: '@hourly'
     publishers:
@@ -201,7 +205,8 @@
           description: "Tag for image release"
     builders:
       - shell: oc login -u {ose-username} -p {ose-password} -n {ose-project-namespace} --insecure-skip-tls-verify={ose-insecure} {ose-uri}
-      - shell: oc tag {ose-image-name}:{ose-image-tag-major-version}-{ose-image-tag-build-number} {ose-image-name}:{ose-image-tag-major-version}-`expr {ose-image-tag-build-number} + {ose-image-tag-increment}`
+      - shell: echo "TODO use $BUILD_NUMBER"
+      #- shell: oc tag {ose-image-name}:{ose-image-tag-major-version}-{ose-image-tag-build-number} {ose-image-name}:{ose-image-tag-major-version}-`expr {ose-image-tag-build-number} + {ose-image-tag-increment}`
 
 - job-template:
     name: 'update-jobs-from-yaml'
