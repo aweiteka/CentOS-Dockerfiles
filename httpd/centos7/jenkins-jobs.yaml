@@ -30,6 +30,7 @@
     ose-imagestream-name: openshift/jenkins-1-centos7
     ose-image-name: acmeapp
     context-dir: jenkins/master
+    oc-cmd: oc -n {ose-project-namespace} --token=`cat {ose-token-file}` --insecure-skip-tls-verify={ose-insecure} --server={ose-uri}
 # If you have more than once source repository copy the scm section
 # edit and use the name value to use it in your job
 - scm:
@@ -46,12 +47,6 @@
 ###
 # End edit values
 ###
-
-- builder:
-    name: oc-command
-    description: Authenticated oc command
-    builders:
-      - shell: "OC=oc -n {ose-project-namespace} --token=`cat {ose-token-file}` --insecure-skip-tls-verify={ose-insecure} --server={ose-uri}"
 
 - project:
    name: automated-builds
@@ -85,13 +80,12 @@
     scm:
       - dockerfile
     builders:
-      - shell: oc login -u {ose-username} -p {ose-password} -n {ose-project-namespace} --insecure-skip-tls-verify={ose-insecure} {ose-uri}
       - shell: |
           #!/bin/bash -x
 
-          DEPLOYMENT=$(oc deploy {ose-image-name} --latest)
+          DEPLOYMENT=$({oc-cmd} deploy {ose-image-name} --latest)
           echo $DEPLOYMENT
-          oc get pods -l name={ose-image-name} -o template -t '{{ $a:=index .items 0 }}{{ $a.metadata.name }}'
+          {oc-cmd} get pods -l name={ose-image-name} -o template -t '{{ $a:=index .items 0 }}{{ $a.metadata.name }}'
 
     publishers:
     - archive:
@@ -107,8 +101,7 @@
     name: 'refresh-imagestreams'
     description: Update OpenShift imagestreams to detect upstream image changes
     builders:
-      - oc-command
-      - shell: '$OC import-image {ose-imagestream-name}'
+      - shell: '{oc-cmd} import-image {ose-imagestream-name}'
     triggers:
       - timed: '@hourly'
     publishers:
@@ -135,23 +128,19 @@
           # grab the success-fail of the actual build
           ###
 
-          oc login -u {ose-username} -p {ose-password} \
-                   -n {ose-project-namespace} \
-                   --insecure-skip-tls-verify={ose-insecure} \
-                   {ose-uri}
-          BUILD=$(oc start-build {ose-image-name})
+          BUILD=$({oc-cmd} start-build {ose-image-name})
           sleep 5
-          oc build-logs $BUILD -f
+          {oc-cmd} build-logs $BUILD -f
           # escape brackets with yet another bracket for jjb compatibility
-          BUILD_STATUS=$(oc get builds $BUILD -o template -t {{{{.status.phase}}}})
+          BUILD_STATUS=$({oc-cmd} get builds $BUILD -o template -t {{{{.status.phase}}}})
           count=1
           attempts=10
           while [ $BUILD_STATUS == "Running" -a $count -lt $attempts ]; do
             echo "Waiting for build status ('$BUILD_STATUS') to complete, attempt $count/$attempts"
             sleep 5
-            BUILD_STATUS=$(oc get builds $BUILD -o template -t {{{{.status.phase}}}})
+            BUILD_STATUS=$({oc-cmd} get builds $BUILD -o template -t {{{{.status.phase}}}})
             if [[ $BUILD_STATUS == "Failed" ]]; then
-              oc get builds $BUILD -o yaml
+              {oc-cmd} get builds $BUILD -o yaml
               echo "Build status: $BUILD_STATUS"
               exit 1
             elif [[ $BUILD_STATUS == "Success" ]]; then
@@ -204,9 +193,8 @@
           name: TAG
           description: "Tag for image release"
     builders:
-      - shell: oc login -u {ose-username} -p {ose-password} -n {ose-project-namespace} --insecure-skip-tls-verify={ose-insecure} {ose-uri}
       - shell: echo "TODO use $BUILD_NUMBER"
-      #- shell: oc tag {ose-image-name}:{ose-image-tag-major-version}-{ose-image-tag-build-number} {ose-image-name}:{ose-image-tag-major-version}-`expr {ose-image-tag-build-number} + {ose-image-tag-increment}`
+      #- shell: {oc-cmd} tag {ose-image-name}:{ose-image-tag-major-version}-{ose-image-tag-build-number} {ose-image-name}:{ose-image-tag-major-version}-`expr {ose-image-tag-build-number} + {ose-image-tag-increment}`
 
 - job-template:
     name: 'update-jobs-from-yaml'
