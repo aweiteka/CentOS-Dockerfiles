@@ -51,7 +51,7 @@
     name: oc-command
     description: Authenticated oc command
     builders:
-      - shell: 'OC=oc -n {ose-project-namespace} --token=`cat {ose-token-file}` --insecure-skip-tls-verify={ose-insecure} --server={ose-uri}'
+      - shell: "OC=oc -n {ose-project-namespace} --token=`cat {ose-token-file}` --insecure-skip-tls-verify={ose-insecure} --server={ose-uri}"
 
 - project:
    name: automated-builds
