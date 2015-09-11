@@ -21,15 +21,12 @@
     description: >
         A jenkins-jobs template to create jobs in Jenkins.
         Do not edit this job through the web user interface.
-    ose-uri: https://192.168.1.13:8443
-    ose-username: test
-    ose-password: test
+    ose-uri: https://console.engint.openshift.com
     ose-insecure: true
-    ose-project-namespace: test
+    ose-project-namespace: build-demo
     ose-token-file: /var/run/secrets/kubernetes.io/serviceaccount/token
-    ose-imagestream-name: openshift/jenkins-1-centos7
     ose-image-name: acmeapp
-    context-dir: jenkins/master
+    context-dir: httpd/centos7
     oc-cmd: oc -n {ose-project-namespace} --token=`cat {ose-token-file}` --insecure-skip-tls-verify={ose-insecure} --server={ose-uri}
 # If you have more than once source repository copy the scm section
 # edit and use the name value to use it in your job
@@ -37,9 +34,9 @@
     name: dockerfile
     scm:
       - git:
-          url: 'https://github.com/aweiteka/ose-build-pipeline.git'
+          url: 'https://github.com/aweiteka/CentOS-Dockerfiles.git'
           branches:
-           - origin/master
+           - origin/jenkins
           skip-tag: true
           git-config-name: Aaron Weitekamp
           git-config-email: aweiteka@redhat.com
@@ -100,8 +97,23 @@
 - job-template:
     name: 'refresh-imagestreams'
     description: Update OpenShift imagestreams to detect upstream image changes
+    scm:
+      - dockerfile
     builders:
-      - shell: '{oc-cmd} import-image {ose-imagestream-name}'
+      - shell: |
+          #!/bin/bash
+          IMAGE=$(awk '/^FROM/ {{ print $2 }}' {context-dir}/Dockerfile)
+          BASE=$(awk '/^FROM/ {{ print $2 }}' {context-dir}/Dockerfile|awk -F":" '{{print $1}}')
+          TAG=$(awk '/^FROM/ {{ print $2 }}' {context-dir}/Dockerfile|awk -F":" '{{print $2}}')
+
+          if {oc-cmd} get imagestreams $BASE ; then
+            {oc-cmd} import-image $BASE
+
+          else
+            echo "Importing image stream $IMAGE as $BASE for the first time."
+            {oc-cmd} import-image $BASE --from='$IMAGE' --confirm
+          fi
+
     triggers:
       - timed: '@hourly'
     publishers:
@@ -121,6 +133,19 @@
     builders:
       - shell: |
           #!/bin/bash
+
+          ###
+          # Import imagestream from Dockerfile if not defined yet
+          ###
+
+          IMAGE=$(awk '/^FROM/ {{ print $2 }}' {context-dir}/Dockerfile)
+          BASE=$(awk '/^FROM/ {{ print $2 }}' {context-dir}/Dockerfile|awk -F":" '{{print $1}}')
+          TAG=$(awk '/^FROM/ {{ print $2 }}' {context-dir}/Dockerfile|awk -F":" '{{print $2}}')
+
+          if ! {oc-cmd} get imagestreams $BASE ; then
+            echo "Importing image stream $IMAGE as $BASE for the first time."
+            {oc-cmd} import-image $BASE --from='$IMAGE' --confirm
+          fi
 
           ###
           # kicking off the build exits immediately
@@ -143,7 +168,7 @@
               {oc-cmd} get builds $BUILD -o yaml
               echo "Build status: $BUILD_STATUS"
               exit 1
-            elif [[ $BUILD_STATUS == "Success" ]]; then
+            elif [[ $BUILD_STATUS == "Complete" ]]; then
               echo "Build status: $BUILD_STATUS"
               exit 0
             fi
@@ -194,7 +219,6 @@
           description: "Tag for image release"
     builders:
       - shell: echo "TODO use $BUILD_NUMBER"
-      #- shell: {oc-cmd} tag {ose-image-name}:{ose-image-tag-major-version}-{ose-image-tag-build-number} {ose-image-name}:{ose-image-tag-major-version}-`expr {ose-image-tag-build-number} + {ose-image-tag-increment}`
 
 - job-template:
     name: 'update-jobs-from-yaml'
